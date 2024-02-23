@@ -2,16 +2,15 @@
 #include <cstdio>
 #include <limits>
 #include <memory>
+#include <iostream>
 #include "bufferedreader.h"
 #include "itch.h"
 #include "order_book.h"
 
 template <itch_t __code>
-class PROCESS
-{
+class PROCESS {
  public:
-  static itch_message<__code> read_from(buf_t *__buf)
-  {
+  static itch_message<__code> read_from(buf_t *__buf) {
     uint16_t const msglen = be16toh(*(uint16_t *)__buf->get(0));
     __buf->advance(2);
     assert(msglen == netlen<__code>);
@@ -22,9 +21,8 @@ class PROCESS
     return ret;
   }
 };
-
-static sprice_t mksigned(price_t price, BUY_SELL buy)
-{
+// 卖出时价格设成负
+static sprice_t mksigned(price_t price, BUY_SELL buy) {
   assert(MKPRIMITIVE(price) < std::numeric_limits<int32_t>::max());
   auto ret = MKPRIMITIVE(price);
   if (BUY_SELL::SELL == buy) ret = -ret;
@@ -36,9 +34,16 @@ static sprice_t mksigned(price_t price, BUY_SELL buy)
     break;                              \
   }
 
-int main()
-{
-  buf_t buf(1024);
+int main() {
+  char *buffer;
+  if ((buffer = getcwd(NULL, 0)) == NULL) {
+    perror("getcwd is error");
+  } else {
+    std::cout << "current path:" << buffer << std::endl;
+    free(buffer);
+  }
+
+  buf_t buf(4096 * 2);
   buf.fd = STDIN_FILENO;
   std::chrono::steady_clock::time_point start;
   size_t npkts = 0;
@@ -80,11 +85,9 @@ int main()
           ++npkts;
         }
         auto const pkt = PROCESS<itch_t::ADD_ORDER>::read_from(&buf);
-        assert(uint64_t(pkt.oid) <
-               uint64_t(std::numeric_limits<int32_t>::max()));
+        assert(uint64_t(pkt.oid) < uint64_t(std::numeric_limits<int32_t>::max()));
 #if BUILD_BOOK
-        order_book::add_order(order_id_t(pkt.oid), book_id_t(pkt.stock_locate),
-                              mksigned(pkt.price, pkt.buy), pkt.qty);
+        order_book::add_order(order_id_t(pkt.oid), book_id_t(pkt.stock_locate), mksigned(pkt.price, pkt.buy), pkt.qty);
 #else
         int64_t oid = int64_t(pkt.oid);
         maxoid = maxoid > uint64_t(pkt.oid) ? maxoid : uint64_t(pkt.oid);
@@ -98,9 +101,8 @@ int main()
       case (itch_t::ADD_ORDER_MPID): {
         auto const pkt = PROCESS<itch_t::ADD_ORDER_MPID>::read_from(&buf);
 #if BUILD_BOOK
-        order_book::add_order(
-            order_id_t(pkt.add_msg.oid), book_id_t(pkt.add_msg.stock_locate),
-            mksigned(pkt.add_msg.price, pkt.add_msg.buy), pkt.add_msg.qty);
+        order_book::add_order(order_id_t(pkt.add_msg.oid), book_id_t(pkt.add_msg.stock_locate), mksigned(pkt.add_msg.price, pkt.add_msg.buy),
+                              pkt.add_msg.qty);
 #else
         ++nadds;
 #endif
@@ -114,8 +116,7 @@ int main()
         break;
       }
       case (itch_t::EXECUTE_ORDER_WITH_PRICE): {
-        auto const pkt =
-            PROCESS<itch_t::EXECUTE_ORDER_WITH_PRICE>::read_from(&buf);
+        auto const pkt = PROCESS<itch_t::EXECUTE_ORDER_WITH_PRICE>::read_from(&buf);
 #if BUILD_BOOK
         order_book::execute_order(order_id_t(pkt.exec.oid), pkt.exec.qty);
 #endif
@@ -138,16 +139,14 @@ int main()
       case (itch_t::REPLACE_ORDER): {
         auto const pkt = PROCESS<itch_t::REPLACE_ORDER>::read_from(&buf);
 #if BUILD_BOOK
-        order_book::replace_order(order_id_t(pkt.oid),
-                                  order_id_t(pkt.new_order_id), pkt.new_qty,
-                                  mksigned(pkt.new_price, BUY_SELL::BUY));
+        order_book::replace_order(order_id_t(pkt.oid), order_id_t(pkt.new_order_id), pkt.new_qty, mksigned(pkt.new_price, BUY_SELL::BUY));
 #endif
         // actually it will get re-signed inside. code smell
         break;
       }
       default: {
         printf("Uh oh bad code %d\n", char(msgtype));
-        assert(false);
+        // assert(false);
         break;
       }
     }
@@ -157,8 +156,6 @@ int main()
   printf("maxoid %lu\n", maxoid);
 #endif
   std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
-  size_t nanos =
-      std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
-  printf("%lu packets in %lu nanos , %.2f nanos per packet \n", npkts, nanos,
-         nanos / (double)npkts);
+  size_t nanos = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
+  printf("%lu packets in %lu nanos , %.2f nanos per packet \n", npkts, nanos, nanos / (double)npkts);
 }

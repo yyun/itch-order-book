@@ -1,3 +1,10 @@
+/*
+ * @Description:
+ * @Author: yyun
+ * @Date: 2023-09-21 16:39:42
+ * @LastEditTime: 2023-09-22 14:15:42
+ * @LastEditors: yyun
+ */
 #pragma once
 #include <assert.h>
 #include <string.h>
@@ -9,8 +16,7 @@
 // { (bool)foo < 0 } are sensical even though it will never happen
 enum class read_t { OK, ERR };
 inline bool is_ok(read_t const retcode) { return read_t::OK == retcode; }
-inline read_t operator!(read_t const code)
-{
+inline read_t operator!(read_t const code) {
   return code;  // will throw compiler error if you try to use it like boolean!
 }
 
@@ -23,13 +29,12 @@ typedef struct buf {
   /** Length of buf */
   unsigned int const len;  // could be private
   /** Position of last byte read into buf */
-  unsigned int limit;  // could be private
+  unsigned int limit;  // could be private 最后一个数据的位置 数据子pos 和limit之间  limit - pos就是有效数据
   unsigned int pos;
-  size_t bytesread;
+  size_t bytesread;  // 一共读了多少数据
   fd_t fd = -1;
   /** Returns a pointer to ptr + pos + idx */
-  char const *get(unsigned int idx) const
-  {
+  char const *get(unsigned int idx) const {
 #if 0  // optimization
 		assert (pos + idx <= limit);
 #endif
@@ -40,27 +45,22 @@ typedef struct buf {
 
   /** Returns available bytes in buf */
   unsigned available(void) const { return limit - pos; }
-  bool available(unsigned n) const
-  {
+  bool available(unsigned n) const {
     return pos + n <= limit;  // faster than available() >= n;
   }
   /** Returns available space to read bytes into */
   unsigned free_space(void) const { return len - limit; }
-  void advance(unsigned bytes)
-  {
+  void advance(unsigned bytes) {  // 指针往后移 消费两个字节
     pos += bytes;
     assert(pos <= limit);
   }
-  void discard_to_pos(void)
-  {
-    if (pos && pos < limit)
-      memmove((void *)ptr, ptr + pos,
-              limit - pos);  // shift to beginning of buf
+  void discard_to_pos(void) {
+    if (pos && pos < limit) memmove((void *)ptr, ptr + pos,
+                                    limit - pos);  // shift to beginning of buf
     limit -= pos;
     pos = 0;
   }
-  void cleanup(void)
-  {
+  void cleanup(void) {
     limit = pos = 0;
     fd = -1;
   }

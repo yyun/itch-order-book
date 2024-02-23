@@ -1,3 +1,10 @@
+/*
+ * @Description:
+ * @Author: yyun
+ * @Date: 2023-09-21 16:39:42
+ * @LastEditTime: 2023-09-22 14:08:57
+ * @LastEditors: yyun
+ */
 #include <errno.h>
 #include <netdb.h>
 #include <netinet/tcp.h>
@@ -10,10 +17,8 @@
  * it will attempt to read. If it is able to read enough bytes
  * then it returns true. On read error it will return false.
  */
-read_t buf_t::ensure(unsigned const n)
-{
-  if (this->available(n))
-    return read_t::OK;  // fast path. call before read for performance
+read_t buf_t::ensure(unsigned const n) {
+  if (this->available(n)) return read_t::OK;  // fast path. call before read for performance
 
   ssize_t bytes = this->read(n);
   if (bytes == 0)
@@ -32,14 +37,13 @@ read_t buf_t::ensure(unsigned const n)
  * This will not advance pos but may advance limit
  * Returns 0 on EOF and a negative number on read error
  */
-ssize_t buf_t::read(unsigned const n)
-{
+ssize_t buf_t::read(unsigned const n) {
   assert(n <= len);
   assert(pos <= limit);
   assert(limit <= len);
   if (pos + n > len) discard_to_pos();
 
-  ssize_t bytes_read = 0;
+  ssize_t bytes_read = 0;  // 本次一共读了多少数据进来， 读满n个数据
   while (this->available() < n) {
     ssize_t bytes = this->read();
     if (bytes < 0) {
@@ -54,9 +58,8 @@ ssize_t buf_t::read(unsigned const n)
 
 // reads as many bytes as possible into buf and returns num bytes
 // advances read_max_bufpos and read_bufpos
-ssize_t buf_t::read()
-{
-  // read into offset however many free bytes left in buffer
+ssize_t buf_t::read() {
+  // read into offset however many free bytes left in buffer ，bytes实际读入的数据量
   ssize_t bytes = ::read(this->fd, (void*)(ptr + limit), len - limit);
   if (-1 == bytes) {
     perror("blocking read into buf!");
@@ -75,10 +78,8 @@ ssize_t buf_t::read()
  * error
  * and only returns zero in the same circumstances that recv or read would (i.e.
  * EOF)*/
-ssize_t buf_t::nb_read()
-{
-  ssize_t bytes =
-      recv(this->fd, (void*)(ptr + limit), len - limit, MSG_DONTWAIT);
+ssize_t buf_t::nb_read() {
+  ssize_t bytes = recv(this->fd, (void*)(ptr + limit), len - limit, MSG_DONTWAIT);
   if (-1 == bytes) return -1;
   assert(bytes <= len);
   assert(bytes >= 0);

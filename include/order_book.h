@@ -50,13 +50,12 @@
  * from stl container resizing.
  */
 
-// TODO replace casts with following:
+// TODO replace casts with following:转换成底层类型
 #define MKPRIMITIVE(__x) ((std::underlying_type<decltype(__x)>::type)__x)
 
-//#define TRACE 1
+// #define TRACE 1
 
-constexpr bool is_power_of_two(uint64_t n)
-{  // stolen from linux header
+constexpr bool is_power_of_two(uint64_t n) {  // stolen from linux header
   return (n != 0 && ((n & (n - 1)) == 0));
 }
 
@@ -87,20 +86,20 @@ bool constexpr is_bid(sprice_t const x) { return int32_t(x) >= 0; }
  * instead of (order *)
  */
 template <class T, typename ptr_t, size_t SIZE_HINT>
-class pool
-{
+class pool {
  public:
   MEMORY_DEFS;
   std::vector<T> m_allocated;
-  std::vector<ptr_t> m_free;
-  pool() { m_allocated.reserve(SIZE_HINT); }
+  std::vector<ptr_t> m_free;  // 删除档位时 把level——idx放入空闲队列中 分配时优先从空闲中分配
+  pool() {
+    m_allocated.reserve(SIZE_HINT);
+    m_free.reserve(SIZE_HINT);
+  }  // 设置初始大小
   pool(size_t reserve_size) { m_allocated.reserve(reserve_size); }
   T *get(ptr_t idx) { return &m_allocated[size_t__(idx)]; }
   T &operator[](ptr_t idx) { return m_allocated[size_t__(idx)]; }
-#define ALLOC_INVARIANT \
-  (m_free_size >= 0) /* aka can't free more than has been allocated */
-  __ptr alloc(void)
-  {
+#define ALLOC_INVARIANT (m_free_size >= 0) /* aka can't free more than has been allocated */
+  __ptr alloc(void) {
     if (m_free.empty()) {
       auto ret = __ptr(m_allocated.size());
       m_allocated.push_back(T());
@@ -114,8 +113,8 @@ class pool
   void free(__ptr idx) { m_free.push_back(idx); }
 #undef ALLOC_INVARIANT
 };
-class level
-{
+
+class level {
  public:
   sprice_t m_price;
   qty_t m_qty;
@@ -138,83 +137,66 @@ enum class order_id_t : uint32_t {};
  */
 typedef struct order {
   qty_t m_qty;
-  level_id_t level_idx;
-  book_id_t book_idx;
+  level_id_t level_idx;  // 在pool中的数据地址
+  book_id_t book_idx;    // 合约代码的id int类型
 } order_t;
 
-class price_level
-{
+class price_level {
  public:
   price_level() {}
-  price_level(sprice_t __price, level_id_t __ptr)
-      : m_price(__price), m_ptr(__ptr)
-  {
-  }
+  price_level(sprice_t __price, level_id_t __ptr) : m_price(__price), m_ptr(__ptr) {}
   sprice_t m_price;
-  level_id_t m_ptr;
+  level_id_t m_ptr;  // 在pool中的数据地址
 };
-
+// order 存放order信息 用orderid来寻址
 template <class T>
-class oidmap
-{
+class oidmap {
  public:
   std::vector<T> m_data;
   size_t m_size;
-  void reserve(order_id_t const oid)
-  {
+  void reserve(order_id_t const oid) {
     size_t const idx = size_t(oid);
     if (idx >= m_data.size()) {
       m_data.resize(idx + 1);
     }
   }
-  T &operator[](order_id_t const oid)
-  {
+  T &operator[](order_id_t const oid) {
     size_t const idx = size_t(oid);
     return m_data[idx];
   }
-  T *get(order_id_t const oid)
-  {
+  T *get(order_id_t const oid) {  // 返回订单在容器中对应的地址
     size_t const idx = size_t(oid);
     return &m_data[idx];
   }
 };
 
-bool operator>(price_level a, price_level b)
-{
-  return int32_t(a.m_price) > int32_t(b.m_price);
-}
+bool operator>(price_level a, price_level b) { return int32_t(a.m_price) > int32_t(b.m_price); }
 
 struct order_id_hash {
   size_t operator()(order_id_t const id) const { return size_t(id); }
 };
 
-qty_t operator+(qty_t const a, qty_t const b)
-{
-  return qty_t(MKPRIMITIVE(a) + MKPRIMITIVE(b));
-}
-
-class order_book
-{
+qty_t operator+(qty_t const a, qty_t const b) { return qty_t(MKPRIMITIVE(a) + MKPRIMITIVE(b)); }
+// MAX_BOOKS 个orderbook ，根据代码个数设定大小
+class order_book {
  public:
   static constexpr size_t MAX_BOOKS = 1 << 14;
   static constexpr size_t NUM_LEVELS = 1 << 20;
-  static order_book *s_books;  // can we allocate this on the stack?
+  static order_book *s_books;  // can we allocate this on the stack?  根据MAX_BOOKS大小开辟的数组  通过代码id来寻址
   static oidmap<order_t> oid_map;
   using level_vector = pool<level, level_id_t, NUM_LEVELS>;
   using sorted_levels_t = std::vector<price_level>;
   // A global allocator for all the price levels allocated by all the books.
-  static level_vector s_levels;
+  static level_vector s_levels;  // pool<level, level_id_t, NUM_LEVELS>; 用来分配内存
   sorted_levels_t m_bids;
   sorted_levels_t m_offers;
   using level_ptr_t = level_vector::__ptr;
 
-  static void add_order(order_id_t const oid, book_id_t const book_idx,
-                        sprice_t const price, qty_t const qty)
-  {
+  static void add_order(order_id_t const oid, book_id_t const book_idx, sprice_t const price, qty_t const qty) {
 #if TRACE
     printf("ADD %lu, %u, %d, %u", oid, book_idx, price, qty);
-#endif  // TRACE
-    oid_map.reserve(oid);
+#endif                     // TRACE
+    oid_map.reserve(oid);  // 不够会扩充大小
     order *order = oid_map.get(oid);
     order->m_qty = qty;
     order->book_idx = book_idx;
@@ -225,11 +207,10 @@ class order_book
     printf(", %u, %u \n", lvl, s_books[size_t(book_idx)].s_levels[lvl].m_qty);
 #endif  // TRACE
   }
-  void ADD_ORDER(order_t *order, sprice_t const price, qty_t const qty)
-  {
+  void ADD_ORDER(order_t *order, sprice_t const price, qty_t const qty) {
     sorted_levels_t *sorted_levels = is_bid(price) ? &m_bids : &m_offers;
     // search descending for the price
-    auto insertion_point = sorted_levels->end();
+    auto insertion_point = sorted_levels->end();  // 升序排列  最大值  bid：998 999 1000 ask：-1003 -1002  -1001
     bool found = false;
     while (insertion_point-- != sorted_levels->begin()) {
       price_level &curprice = *insertion_point;
@@ -243,34 +224,31 @@ class order_book
       }
     }
     if (!found) {
-      order->level_idx = s_levels.alloc();
+      order->level_idx = s_levels.alloc();  // 分配的内存 在pool中的位置id   level （价格和数量）
       s_levels[order->level_idx].m_qty = qty_t(0);
       s_levels[order->level_idx].m_price = price;
-      price_level const px(price, order->level_idx);
+      price_level const px(price, order->level_idx);  // 价格档位
       ++insertion_point;
-      sorted_levels->insert(insertion_point, px);
+      sorted_levels->insert(insertion_point, px);  // std::vector<price_level> sorted
     }
-    s_levels[order->level_idx].m_qty = s_levels[order->level_idx].m_qty + qty;
+    s_levels[order->level_idx].m_qty = s_levels[order->level_idx].m_qty + qty;  // pool
   }
-  static void delete_order(order_id_t const oid)
-  {
+  static void delete_order(order_id_t const oid) {
 #if TRACE
     printf("DELETE %lu\n", oid);
 #endif  // TRACE
     order_t *order = oid_map.get(oid);
     s_books[size_t(order->book_idx)].DELETE_ORDER(order);
   }
-  static void cancel_order(order_id_t const oid, qty_t const qty)
-  {
+  static void cancel_order(order_id_t const oid, qty_t const qty) {
 #if TRACE
     printf("REDUCE %lu, %u\n", oid, qty);
-#endif  // TRACE
-    order_t *order = oid_map.get(oid);
+#endif                                  // TRACE
+    order_t *order = oid_map.get(oid);  // 部撤
     s_books[size_t(order->book_idx)].REDUCE_ORDER(order, qty);
   }
   // shared between cancel(aka partial cancel aka reduce) and execute
-  void REDUCE_ORDER(order_t *order, qty_t const qty)
-  {
+  void REDUCE_ORDER(order_t *order, qty_t const qty) {
     auto tmp = MKPRIMITIVE(s_levels[order->level_idx].m_qty);
     tmp -= MKPRIMITIVE(qty);
     s_levels[order->level_idx].m_qty = qty_t(tmp);
@@ -280,14 +258,12 @@ class order_book
     order->m_qty = qty_t(tmp);
   }
   // shared between delete and execute
-  void DELETE_ORDER(order_t *order)
-  {
-    assert(MKPRIMITIVE(s_levels[order->level_idx].m_qty) >=
-           MKPRIMITIVE(order->m_qty));
+  void DELETE_ORDER(order_t *order) {
+    assert(MKPRIMITIVE(s_levels[order->level_idx].m_qty) >= MKPRIMITIVE(order->m_qty));
     auto tmp = MKPRIMITIVE(s_levels[order->level_idx].m_qty);
     tmp -= MKPRIMITIVE(order->m_qty);
-    s_levels[order->level_idx].m_qty = qty_t(tmp);
-    if (qty_t(0) == s_levels[order->level_idx].m_qty) {
+    s_levels[order->level_idx].m_qty = qty_t(tmp);       // 修改挂单量
+    if (qty_t(0) == s_levels[order->level_idx].m_qty) {  //=0 删除这个价格的档位信息
       // DELETE_SORTED([order->level_idx].price);
       sprice_t price = s_levels[order->level_idx].m_price;
       sorted_levels_t *sorted_levels = is_bid(price) ? &m_bids : &m_offers;
@@ -301,8 +277,7 @@ class order_book
       s_levels.free(order->level_idx);
     }
   }
-  static void execute_order(order_id_t const oid, qty_t const qty)
-  {
+  static void execute_order(order_id_t const oid, qty_t const qty) {
 #if TRACE
     printf("EXECUTE %lu %u\n", oid, qty);
 #endif  // TRACE
@@ -310,18 +285,16 @@ class order_book
     order_book *book = &s_books[MKPRIMITIVE(order->book_idx)];
 
     if (qty == order->m_qty) {
-      book->DELETE_ORDER(order);
+      book->DELETE_ORDER(order);  // 完全成交
     } else {
-      book->REDUCE_ORDER(order, qty);
+      book->REDUCE_ORDER(order, qty);  // 部分成交
     }
   }
-  static void replace_order(order_id_t const old_oid, order_id_t const new_oid,
-                            qty_t const new_qty, sprice_t new_price)
-  {
+  static void replace_order(order_id_t const old_oid, order_id_t const new_oid, qty_t const new_qty, sprice_t new_price) {
 #if TRACE
     printf("REPLACE %lu %lu %d %u\n", old_oid, new_oid, new_price, new_qty);
-#endif  // TRACE
-    order_t *order = oid_map.get(old_oid);
+#endif                                      // TRACE
+    order_t *order = oid_map.get(old_oid);  // 先撤掉老的订单 再增加新的订单
     order_book *book = &s_books[MKPRIMITIVE(order->book_idx)];
     bool const bid = is_bid(book->s_levels[order->level_idx].m_price);
     book->DELETE_ORDER(order);
@@ -334,4 +307,4 @@ class order_book
 
 oidmap<order_t> order_book::oid_map = oidmap<order_t>();
 order_book *order_book::s_books = new order_book[order_book::MAX_BOOKS];
-order_book::level_vector order_book::s_levels = level_vector();
+order_book::level_vector order_book::s_levels = level_vector();  // pool<level, level_id_t, NUM_LEVELS>
